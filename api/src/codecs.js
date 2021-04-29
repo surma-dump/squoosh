@@ -1,59 +1,56 @@
-import { promises as fsp } from 'fs';
 import { instantiateEmscriptenWasm, pathify } from './emscripten-utils.js';
 
 // MozJPEG
-import mozEnc from '../../codecs/mozjpeg/enc/mozjpeg_node_enc.js';
-import mozEncWasm from 'asset-url:../../codecs/mozjpeg/enc/mozjpeg_node_enc.wasm';
-import mozDec from '../../codecs/mozjpeg/dec/mozjpeg_node_dec.js';
-import mozDecWasm from 'asset-url:../../codecs/mozjpeg/dec/mozjpeg_node_dec.wasm';
+import mozEnc from '../../codecs/mozjpeg/enc/mozjpeg_enc.js';
+import mozEncWasm from 'asset-url:../../codecs/mozjpeg/enc/mozjpeg_enc.wasm';
+import mozDec from '../../codecs/mozjpeg/dec/mozjpeg_dec.js';
+import mozDecWasm from 'asset-url:../../codecs/mozjpeg/dec/mozjpeg_dec.wasm';
 
 // WebP
-import webpEnc from '../../codecs/webp/enc/webp_node_enc.js';
-import webpEncWasm from 'asset-url:../../codecs/webp/enc/webp_node_enc.wasm';
-import webpDec from '../../codecs/webp/dec/webp_node_dec.js';
-import webpDecWasm from 'asset-url:../../codecs/webp/dec/webp_node_dec.wasm';
+import webpEnc from '../../codecs/webp/enc/webp_enc.js';
+import webpEncWasm from 'asset-url:../../codecs/webp/enc/webp_enc.wasm';
+import webpDec from '../../codecs/webp/dec/webp_dec.js';
+import webpDecWasm from 'asset-url:../../codecs/webp/dec/webp_dec.wasm';
 
 // AVIF
-import avifEnc from '../../codecs/avif/enc/avif_node_enc.js';
-import avifEncWasm from 'asset-url:../../codecs/avif/enc/avif_node_enc.wasm';
-import avifDec from '../../codecs/avif/dec/avif_node_dec.js';
-import avifDecWasm from 'asset-url:../../codecs/avif/dec/avif_node_dec.wasm';
+import avifEnc from '../../codecs/avif/enc/avif_enc.js';
+import avifEncWasm from 'asset-url:../../codecs/avif/enc/avif_enc.wasm';
+import avifDec from '../../codecs/avif/dec/avif_dec.js';
+import avifDecWasm from 'asset-url:../../codecs/avif/dec/avif_dec.wasm';
 
 // JXL
-import jxlEnc from '../../codecs/jxl/enc/jxl_node_enc.js';
-import jxlEncWasm from 'asset-url:../../codecs/jxl/enc/jxl_node_enc.wasm';
-import jxlDec from '../../codecs/jxl/dec/jxl_node_dec.js';
-import jxlDecWasm from 'asset-url:../../codecs/jxl/dec/jxl_node_dec.wasm';
+import jxlEnc from '../../codecs/jxl/enc/jxl_enc.js';
+import jxlEncWasm from 'asset-url:../../codecs/jxl/enc/jxl_enc.wasm';
+import jxlDec from '../../codecs/jxl/dec/jxl_dec.js';
+import jxlDecWasm from 'asset-url:../../codecs/jxl/dec/jxl_dec.wasm';
 
 // WP2
-import wp2Enc from '../../codecs/wp2/enc/wp2_node_enc.js';
-import wp2EncWasm from 'asset-url:../../codecs/wp2/enc/wp2_node_enc.wasm';
-import wp2Dec from '../../codecs/wp2/dec/wp2_node_dec.js';
-import wp2DecWasm from 'asset-url:../../codecs/wp2/dec/wp2_node_dec.wasm';
+import wp2Enc from '../../codecs/wp2/enc/wp2_enc.js';
+import wp2EncWasm from 'asset-url:../../codecs/wp2/enc/wp2_enc.wasm';
+import wp2Dec from '../../codecs/wp2/dec/wp2_dec.js';
+import wp2DecWasm from 'asset-url:../../codecs/wp2/dec/wp2_dec.wasm';
 
 // PNG
 import * as pngEncDec from '../../codecs/png/pkg/squoosh_png.js';
 import pngEncDecWasm from 'asset-url:../../codecs/png/pkg/squoosh_png_bg.wasm';
-const pngEncDecPromise = pngEncDec.default(
-  fsp.readFile(pathify(pngEncDecWasm)),
-);
+const pngEncDecPromise = pngEncDec.default(fetch(pathify(pngEncDecWasm)));
 
 // OxiPNG
 import * as oxipng from '../../codecs/oxipng/pkg/squoosh_oxipng.js';
 import oxipngWasm from 'asset-url:../../codecs/oxipng/pkg/squoosh_oxipng_bg.wasm';
-const oxipngPromise = oxipng.default(fsp.readFile(pathify(oxipngWasm)));
+const oxipngPromise = oxipng.default(fetch(pathify(oxipngWasm)));
 
 // Resize
 import * as resize from '../../codecs/resize/pkg/squoosh_resize.js';
 import resizeWasm from 'asset-url:../../codecs/resize/pkg/squoosh_resize_bg.wasm';
-const resizePromise = resize.default(fsp.readFile(pathify(resizeWasm)));
+const resizePromise = resize.default(fetch(pathify(resizeWasm)));
 
 // rotate
 import rotateWasm from 'asset-url:../../codecs/rotate/rotate.wasm';
 
 // ImageQuant
-import imageQuant from '../../codecs/imagequant/imagequant_node.js';
-import imageQuantWasm from 'asset-url:../../codecs/imagequant/imagequant_node.wasm';
+import imageQuant from '../../codecs/imagequant/imagequant.js';
+import imageQuantWasm from 'asset-url:../../codecs/imagequant/imagequant.wasm';
 const imageQuantPromise = instantiateEmscriptenWasm(imageQuant, imageQuantWasm);
 
 // Our decoders currently rely on a `ImageData` global.
@@ -169,7 +166,7 @@ export const preprocessors = {
         const sameDimensions = degrees == 0 || degrees == 180;
         const size = width * height * 4;
         const { instance } = await WebAssembly.instantiate(
-          await fsp.readFile(pathify(rotateWasm)),
+          await fetch(pathify(rotateWasm)),
         );
         const { memory } = instance.exports;
         const additionalPagesNeeded = Math.ceil(
@@ -273,14 +270,20 @@ export const codecs = {
     dec: () => instantiateEmscriptenWasm(avifDec, avifDecWasm),
     enc: () => instantiateEmscriptenWasm(avifEnc, avifEncWasm),
     defaultEncoderOptions: {
+      cqLevel: 33,
       minQuantizer: 33,
       maxQuantizer: 63,
       minQuantizerAlpha: 33,
+      cqAlphaLevel: -1,
+      denoiseLevel: 0,
       maxQuantizerAlpha: 63,
       tileColsLog2: 0,
       tileRowsLog2: 0,
       speed: 8,
       subsample: 1,
+      chromaDeltaQ: false,
+      sharpness: 0,
+      targetSsim: false,
     },
     autoOptimize: {
       option: 'maxQuantizer',

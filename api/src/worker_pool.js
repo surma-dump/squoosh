@@ -1,4 +1,3 @@
-import { Worker, parentPort } from 'worker_threads';
 import { TransformStream } from 'web-streams-polyfill';
 
 function uuid() {
@@ -11,14 +10,18 @@ function jobPromise(worker, msg) {
   return new Promise((resolve) => {
     const id = uuid();
     worker.postMessage({ msg, id });
-    worker.on('message', function f({ result, id: rid }) {
+    worker.addEventListener('message', function f({ data }) {
+      const result = data.result;
+      const rid = data.id;
       if (rid !== id) {
         return;
       }
-      worker.off('message', f);
+      worker.removeEventListener('message', f);
       resolve(result);
     });
-    worker.on('error', (error) => console.error('Worker error: ', error));
+    worker.addEventListener('error', (error) =>
+      console.error('Worker error: ', error),
+    );
   });
 }
 
@@ -30,7 +33,11 @@ export default class WorkerPool {
 
     const writer = this.workerQueue.writable.getWriter();
     for (let i = 0; i < numWorkers; i++) {
-      writer.write(new Worker(workerFile));
+      writer.write(
+        new Worker(new URL('./worker.js', import.meta.url), {
+          type: 'module',
+        }),
+      );
     }
     writer.releaseLock();
 
@@ -85,10 +92,10 @@ export default class WorkerPool {
   }
 
   static useThisThreadAsWorker(cb) {
-    parentPort.on('message', async (data) => {
-      const { msg, id } = data;
+    self.addEventListener('message', async (event) => {
+      const { msg, id } = event.data;
       const result = await cb(msg);
-      parentPort.postMessage({ result, id });
+      self.postMessage({ result, id });
     });
   }
 }

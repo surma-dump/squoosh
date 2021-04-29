@@ -4,7 +4,7 @@ CODEC_OUT_RELATIVE := .libs/libjpeg.a rdswitch.o
 CODEC_OUT := $(addprefix $(CODEC_DIR)/, $(CODEC_OUT_RELATIVE))
 ENVIRONMENT = worker
 
-OUT_JS := enc/mozjpeg_enc.js enc/mozjpeg_node_enc.js dec/mozjpeg_node_dec.js
+OUT_JS := enc/mozjpeg_enc.js dec/mozjpeg_dec.js enc/mozjpeg_node_enc.js dec/mozjpeg_node_dec.js
 OUT_WASM := $(OUT_JS:.js=.wasm)
 
 .PHONY: all clean

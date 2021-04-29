@@ -4,29 +4,27 @@ import asset from './lib/asset-plugin.js';
 import json from './lib/json-plugin.js';
 import autojson from './lib/autojson-plugin.js';
 import { getBabelOutputPlugin } from '@rollup/plugin-babel';
-import { builtinModules } from 'module';
+import OMT from '@surma/rollup-plugin-off-main-thread';
 
 /** @type {import('rollup').RollupOptions} */
 export default {
   input: 'src/index.js',
   output: {
     dir: 'build',
-    format: 'cjs',
+    format: 'es',
     assetFileNames: '[name]-[hash][extname]',
-    // This is needed so the resulting `index.js` can be
-    // executed by `npx`.
-    banner: '#!/usr/bin/env node',
   },
   plugins: [
     resolve(),
     cjs(),
     asset(),
+    OMT(),
     autojson(),
     json(),
     getBabelOutputPlugin({
       babelrc: false,
       configFile: false,
-      minified: process.env.DEBUG != '',
+      minified: false, //process.env.DEBUG != '',
       comments: false,
       presets: [
         [
@@ -41,5 +39,4 @@ export default {
       ],
     }),
   ],
-  external: builtinModules,
 };

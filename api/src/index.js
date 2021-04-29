@@ -1,14 +1,6 @@
-import { program } from 'commander';
-import JSON5 from 'json5';
-import { isMainThread } from 'worker_threads';
-import { extname, join, basename } from 'path';
-import { promises as fsp } from 'fs';
-import { resolve as resolvePath } from 'path';
-import { version } from 'json:../package.json';
-
+import { join, basename, extname } from 'path-browserify';
 import { codecs as supportedFormats, preprocessors } from './codecs.js';
 import WorkerPool from './worker_pool.js';
-import { autoOptimize } from './auto-optimizer.js';
 
 function clamp(v, min, max) {
   if (v < min) return min;
@@ -23,118 +15,8 @@ function prettyPrintSize(size) {
   return (size / 2 ** (10 * index)).toFixed(2) + suffix[index];
 }
 
-async function decodeFile(file) {
-  const buffer = await fsp.readFile(file);
-  const firstChunk = buffer.slice(0, 16);
-  const firstChunkString = Array.from(firstChunk)
-    .map((v) => String.fromCodePoint(v))
-    .join('');
-  const key = Object.entries(supportedFormats).find(([name, { detectors }]) =>
-    detectors.some((detector) => detector.exec(firstChunkString)),
-  )?.[0];
-  if (!key) {
-    throw Error(`${file} has an unsupported format`);
-  }
-  const rgba = (await supportedFormats[key].dec()).decode(
-    new Uint8Array(buffer),
-  );
-  return {
-    file,
-    bitmap: rgba,
-    size: buffer.length,
-  };
-}
-
-async function preprocessImage({ preprocessorName, options, file }) {
-  const preprocessor = await preprocessors[preprocessorName].instantiate();
-  file.bitmap = await preprocessor(
-    file.bitmap.data,
-    file.bitmap.width,
-    file.bitmap.height,
-    options,
-  );
-  return file;
-}
-
-async function encodeFile({
-  file,
-  size,
-  bitmap: bitmapIn,
-  outputFile,
-  encName,
-  encConfig,
-  optimizerButteraugliTarget,
-  maxOptimizerRounds,
-}) {
-  let out, infoText;
-  const encoder = await supportedFormats[encName].enc();
-  if (encConfig === 'auto') {
-    const optionToOptimize = supportedFormats[encName].autoOptimize.option;
-    const decoder = await supportedFormats[encName].dec();
-    const encode = (bitmapIn, quality) =>
-      encoder.encode(
-        bitmapIn.data,
-        bitmapIn.width,
-        bitmapIn.height,
-        Object.assign({}, supportedFormats[encName].defaultEncoderOptions, {
-          [optionToOptimize]: quality,
-        }),
-      );
-    const decode = (binary) => decoder.decode(binary);
-    const { bitmap, binary, quality } = await autoOptimize(
-      bitmapIn,
-      encode,
-      decode,
-      {
-        min: supportedFormats[encName].autoOptimize.min,
-        max: supportedFormats[encName].autoOptimize.max,
-        butteraugliDistanceGoal: optimizerButteraugliTarget,
-        maxRounds: maxOptimizerRounds,
-      },
-    );
-    out = binary;
-    const opts = {
-      // 5 significant digits is enough
-      [optionToOptimize]: Math.round(quality * 10000) / 10000,
-    };
-    infoText = ` using --${encName} '${JSON5.stringify(opts)}'`;
-  } else {
-    out = encoder.encode(
-      bitmapIn.data.buffer,
-      bitmapIn.width,
-      bitmapIn.height,
-      encConfig,
-    );
-  }
-  await fsp.writeFile(outputFile, out);
-  return {
-    infoText,
-    inputSize: size,
-    inputFile: file,
-    outputFile,
-    outputSize: out.length,
-  };
-}
-
-// both decoding and encoding go through the worker pool
-function handleJob(params) {
-  const { operation } = params;
-  switch (operation) {
-    case 'encode':
-      return encodeFile(params);
-    case 'decode':
-      return decodeFile(params.file);
-    case 'preprocess':
-      return preprocessImage(params);
-    default:
-      throw Error(`Invalid job "${operation}"`);
-  }
-}
-
-function progressTracker(results) {
-  const spinner = ora();
+function progressTracker(results, program) {
   const tracker = {};
-  tracker.spinner = spinner;
   tracker.progressOffset = 0;
   tracker.totalOffset = 0;
   let status = '';
@@ -144,85 +26,65 @@ function progressTracker(results) {
   };
   let progress = '';
   tracker.setProgress = (done, total) => {
-    spinner.prefixText = kleur.dim(`${done}/${total}`);
     const completeness =
       (tracker.progressOffset + done) / (tracker.totalOffset + total);
-    progress = kleur.cyan(
-      `▐${'▨'.repeat((completeness * 10) | 0).padEnd(10, '╌')}▌ `,
-    );
+    progress = `▐${'▨'.repeat((completeness * 10) | 0).padEnd(10, '╌')}▌ `;
     update();
   };
   function update() {
-    spinner.text = progress + kleur.bold(status) + getResultsText();
+    console.log(progress + status.bold() + getResultsText());
   }
   tracker.finish = (text) => {
-    spinner.succeed(kleur.bold(text) + getResultsText());
+    console.log('finished', text.bold() + getResultsText());
   };
   function getResultsText() {
     let out = '';
     for (const [filename, result] of results.entries()) {
-      out += `\n ${kleur.cyan(filename)}: ${prettyPrintSize(result.size)}`;
+      out += `\n ${filename}: ${prettyPrintSize(result.size)}`;
       for (const { outputFile, outputSize, infoText } of result.outputs) {
         const name = (program.suffix + extname(outputFile)).padEnd(5);
-        out += `\n  ${kleur.dim('└')} ${kleur.cyan(name)} → ${prettyPrintSize(
-          outputSize,
-        )}`;
+        out += `\n  ${'└'} ${name} → ${prettyPrintSize(outputSize)}`;
         const percent = ((outputSize / result.size) * 100).toPrecision(3);
-        out += ` (${kleur[outputSize > result.size ? 'red' : 'green'](
-          percent + '%',
-        )})`;
-        if (infoText) out += kleur.yellow(infoText);
+        out += ` (${percent}%)`;
+        if (infoText) out += infoText;
       }
     }
     return out || '\n';
   }
-  spinner.start();
   return tracker;
 }
 
-async function getInputFiles(paths) {
-  const validFiles = [];
+export async function run({
+  files = [],
+  suffix = '',
+  optimizerButteraugliTarget = false,
+  outputDir = '',
+  maxOptimizerRounds = 8,
+  ...extras
+}) {
+  // We don't output to disk, only memory.
 
-  for (const path of paths) {
-    const files = (await fsp.lstat(path)).isDirectory()
-      ? (await fsp.readdir(path)).map((file) => join(path, file))
-      : [path];
-    for (const file of files) {
-      try {
-        await fsp.stat(file);
-      } catch (err) {
-        if (err.code === 'ENOENT') {
-          console.warn(
-            `Warning: Input file does not exist: ${resolvePath(file)}`,
-          );
-          continue;
-        } else {
-          throw err;
-        }
-      }
-
-      validFiles.push(file);
-    }
-  }
-
-  return validFiles;
+  return await processFiles(files, {
+    suffix,
+    optimizerButteraugliTarget,
+    outputDir,
+    maxOptimizerRounds,
+    ...extras,
+  });
 }
 
-async function processFiles(files) {
-  files = await getInputFiles(files);
-
-  const parallelism = wi;
+async function processFiles(files, program) {
+  // files will be files or blobs from the page.
+  const parallelism = navigator.hardwareConcurrency;
 
   const results = new Map();
-  const progress = progressTracker(results);
+  const progress = progressTracker(results, program);
 
   progress.setStatus('Decoding...');
   progress.totalOffset = files.length;
   progress.setProgress(0, files.length);
 
-  const workerPool = new WorkerPool(parallelism, __filename);
-  // Create output directory
-  await fsp.mkdir(program.outputDir, { recursive: true });
+  const workerPool = new WorkerPool(parallelism);
 
   let decoded = 0;
   let decodedFiles = await Promise.all(
@@ -231,7 +93,7 @@ async function processFiles(files) {
         operation: 'decode',
         file,
       });
-      results.set(file, {
+      results.set(file.name, {
         file: result.file,
         size: result.size,
         outputs: [],
@@ -249,7 +111,7 @@ async function processFiles(files) {
     const preprocessorOptions = Object.assign(
       {},
       value.defaultOptions,
-      JSON5.parse(preprocessorParam),
+      preprocessorParam,
     );
 
     decodedFiles = await Promise.all(
@@ -265,15 +127,15 @@ async function processFiles(files) {
   }
 
   progress.progressOffset = decoded;
-  progress.setStatus('Encoding ' + kleur.dim(`(${parallelism} threads)`));
+  progress.setStatus(`Encoding (${parallelism} threads)`);
   progress.setProgress(0, files.length);
 
   const jobs = [];
   let jobsStarted = 0;
   let jobsFinished = 0;
   for (const { file, bitmap, size } of decodedFiles) {
-    const ext = extname(file);
-    const base = basename(file, ext) + program.suffix;
+    const ext = extname(file.name);
+    const base = basename(file.name, ext) + program.suffix;
 
     for (const [encName, value] of Object.entries(supportedFormats)) {
       if (!program[encName]) {
@@ -284,11 +146,7 @@ async function processFiles(files) {
       const encConfig =
         encParam.toLowerCase() === 'auto'
           ? 'auto'
-          : Object.assign(
-              {},
-              value.defaultEncoderOptions,
-              JSON5.parse(encParam),
-            );
+          : Object.assign({}, value.defaultEncoderOptions, encParam);
       const outputFile = join(program.outputDir, `${base}.${value.extension}`);
       jobsStarted++;
       const p = workerPool
@@ -307,7 +165,7 @@ async function processFiles(files) {
         })
         .then((output) => {
           jobsFinished++;
-          results.get(file).outputs.push(output);
+          results.get(file.name).outputs.push(output);
           progress.setProgress(jobsFinished, jobsStarted);
         });
       jobs.push(p);
@@ -320,40 +178,10 @@ async function processFiles(files) {
   await workerPool.join();
   await Promise.all(jobs);
   progress.finish('Squoosh results:');
+
+  return results;
 }
 
-if (isMainThread) {
-  program
-    .name('squoosh-cli')
-    .version(version)
-    .arguments('<files...>')
-    .option('-d, --output-dir <dir>', 'Output directory', '.')
-    .option('-s, --suffix <suffix>', 'Append suffix to output files', '')
-    .option(
-      '--max-optimizer-rounds <rounds>',
-      'Maximum number of compressions to use for auto optimizations',
-      '6',
-    )
-    .option(
-      '--optimizer-butteraugli-target <butteraugli distance>',
-      'Target Butteraugli distance for auto optimizer',
-      '1.4',
-    )
-    .action(processFiles);
-
-  // Create a CLI option for each supported preprocessor
-  for (const [key, value] of Object.entries(preprocessors)) {
-    program.option(`--${key} [config]`, value.description);
-  }
-  // Create a CLI option for each supported encoder
-  for (const [key, value] of Object.entries(supportedFormats)) {
-    program.option(
-      `--${key} [config]`,
-      `Use ${value.name} to generate a .${value.extension} file with the given configuration`,
-    );
-  }
-
-  program.parse(process.argv);
-} else {
-  WorkerPool.useThisThreadAsWorker(handleJob);
-}
+// processFiles()
+// or
+// WorkerPool.useThisThreadAsWorker(handleJob);
